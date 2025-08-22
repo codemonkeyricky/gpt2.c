@@ -10,20 +10,25 @@
 #include <time.h>
 #include <unistd.h>
 
+struct RotaryPosEmb {
+    float inv_freq[64];
+};
+
+struct Derived {
+    struct RotaryPosEmb rope;
+};
+
 struct Config {
     int vocab_size;
     int n_embed;
+    struct Derived d;
 };
 
 struct Mmapping {
     const __bf16 *embeddings;
 };
 
-struct RotaryPosEmb {
-    float inv_freq[64];
-};
-
-void rope_init(struct Config *c, struct RotaryPosEmb *rope) {
+void rope_init(struct Config *c) {
 
     // t = config.rope_theta
     // r = torch.arange(0, d, 2)
@@ -37,7 +42,7 @@ void rope_init(struct Config *c, struct RotaryPosEmb *rope) {
     for (int i = 0; i < d / 2; i++) {
         float r = (float)(i * 2); // r = 0, 2, 4, ..., d-2
         float exponent = r / (float)d;
-        rope->inv_freq[i] = 1.0f / powf(t, exponent);
+        c->d.rope.inv_freq[i] = 2.0f / powf(t, exponent);
     }
 }
 
@@ -82,25 +87,32 @@ void rope_forward(struct RotaryPosEmb *rope, int seq_len, __bf16 *cos, __bf16 *s
     }
 }
 
-int main() {
-
-    struct Mmapping mmapping = {};
-    struct Config config = {
-        .vocab_size = 152064,
-        .n_embed = 2048,
-    };
-
+void mmap_init(struct Mmapping *mmapping) {
     int fd = open("embeddings.bin", O_RDONLY);
     assert(fd > -1);
     int file_size = lseek(fd, 0, SEEK_END);
     lseek(fd, 0, SEEK_SET);
-    mmapping.embeddings = (__bf16 *)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    mmapping->embeddings = (__bf16 *)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
     close(fd);
+}
+
+void config_init(struct Config *config) {
+    config->vocab_size = 152064;
+    config->n_embed = 2048;
+
+    rope_init(config);
+}
+
+int main() {
+
+    struct Mmapping mmapping = {};
+    struct Config config = {};
+    struct RotaryPosEmb rope = {};
+
+    mmap_init(&mmapping);
+    config_init(&config);
 
     struct Config *c = &config;
-
-    struct RotaryPosEmb rope = {};
-    rope_init(c, &rope);
 
     __bf16 embeddings[c->n_embed] = {};
 
