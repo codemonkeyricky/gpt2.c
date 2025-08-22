@@ -1,4 +1,4 @@
-qwen: 
+q: 
 	gcc qwen25.c -g -lm
 
 all:
