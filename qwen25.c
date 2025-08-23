@@ -26,11 +26,26 @@ struct Config {
 
 struct Layer {
     const __bf16 *input_layernorm;
+    const __bf16 *q_proj;
+    const __bf16 *k_proj;
+    const __bf16 *v_proj;
 };
 
 struct Mmapping {
     const __bf16 *embeddings;
     struct Layer *layers;
+};
+
+struct Runtime {
+    __bf16 *q;
+    __bf16 *k;
+    __bf16 *v;
+};
+
+struct Transformer {
+    struct Config config;
+    struct Mmapping mmapping;
+    struct Runtime runtime;
 };
 
 void rope_init(struct Config *c) {
@@ -155,30 +170,127 @@ void input_layernorm(__bf16 *out, const __bf16 *in, struct Config *c, struct Mma
     }
 }
 
+void matmul(__bf16 *__restrict xout_in, const __bf16 *__restrict x_in, const __bf16 *__restrict w_in, int n, int d) {
+    __bf16 *xout = xout_in;
+    const __bf16 *x = x_in;
+    const __bf16 *w = w_in;
+    for (int i = 0; i < d; i++) {
+        xout[i] = 0;
+        for (int j = 0; j < n; j++) {
+            xout[i] += w[i * n + j] * x[j];
+        }
+    }
+}
+
+void self_attention(__bf16 *__restrict xout, __bf16 *__restrict x, const struct Transformer *xfmr, const int layer,
+                    const int pos) {
+
+    const struct Config *p = &xfmr->config;
+    const struct Runtime *r = &xfmr->runtime;
+    const struct Mmapping *m = &xfmr->mmapping;
+
+    /* attention weight and bias */
+    matmul(r->q, x, m->layers[layer].q_proj, p->n_embed, p->n_embed);
+    matmul(r->k, x, m->layers[layer].k_proj, p->n_embed, 256);
+    matmul(r->v, x, m->layers[layer].v_proj, p->n_embed, 256);
+
+#if 0
+    /* split attention into q, k, v */
+    const float *q = attn;
+    const float *k = attn + p->dim;     // key
+    const float *v = attn + p->dim * 2; // value
+
+    /* Append current key/value to the cache */
+    size_t hs = p->dim / p->n_heads;
+    for (size_t h = 0; h < p->n_heads; h++) {
+        memcpy(s->layers[layer].key[h].cache + pos * hs, k + h * hs, hs * sizeof(float));
+        memcpy(s->layers[layer].value[h].cache + pos * hs, v + h * hs, hs * sizeof(float));
+    }
+
+    float *y = xout;
+    memset(y, 0, p->dim * sizeof(float)); // clear output buffer
+
+    /* Calculate attention score */
+    float att[pos + 1] = {};
+    for (int h = 0; h < p->n_heads; h++) {
+
+        /* find the query head */
+        const float *qq = q + h * hs; // (1, hs)
+        for (int t = 0; t <= pos; t++) {
+            float *kk = s->layers[layer].key[h].cache + t * hs; // (T, hs)
+            float score = 0.0f;
+            for (int i = 0; i < hs; i++) {
+                score += qq[i] * kk[i];
+            }
+            att[t] = score;
+        }
+
+        for (int t = 0; t <= pos; t++) {
+            att[t] /= sqrtf(hs);
+        }
+
+        /* soft max */
+
+        float max_att = att[0];
+        for (int t = 1; t <= pos; t++) {
+            if (att[t] > max_att)
+                max_att = att[t];
+        }
+        float sum_exp = 0.0f;
+        for (int t = 0; t <= pos; t++) {
+            att[t] = expf(att[t] - max_att);
+            sum_exp += att[t];
+        }
+        for (int t = 0; t <= pos; t++) {
+            att[t] /= sum_exp;
+        }
+
+        /* y = att @ v // (1, T) x (T, hs) -> (1, hs) */
+        for (int i = 0; i < hs; i++) {
+            float *vv = s->layers[layer].value[h].cache;
+            float *yy = y + h * hs; // (1, hs)
+            for (int t = 0; t <= pos; t++) {
+                /* find v for the current head */
+                yy[i] += att[t] * vv[t * hs + i];
+            }
+        }
+    }
+
+    memcpy(x, y, p->dim * sizeof(float));
+
+    ww = w->h[layer].att.c_attn_proj_w; // weight for the projection
+    bb = w->h[layer].att.c_attn_proj_b; // bias for the projection
+    matmul_bias(y, x, ww, bb, p->dim, p->dim);
+#endif
+}
+
 int main() {
 
-    struct Mmapping mmapping = {};
-    struct Config config = {};
-    struct RotaryPosEmb rope = {};
+    // struct Mmapping mmapping = {};
+    // struct Config config = {};
+    // struct RotaryPosEmb rope = {};
+    struct Transformer xfmr = {};
 
-    config_init(&config);
-    mmap_init(&config, &mmapping);
+    struct Config *c = &xfmr.config;
+    struct Mmapping *m = &xfmr.mmapping;
+    struct Transformer *x = &xfmr;
 
-    struct Config *c = &config;
-    struct Mmapping *m = &mmapping;
+    config_init(c);
+    mmap_init(c, m);
 
     __bf16 embeddings[c->n_embed] = {}, embeddings2[c->n_embed] = {};
 
     int token = 151644;
-    memcpy(embeddings, mmapping.embeddings + token * c->n_embed, c->n_embed * sizeof(__bf16));
+    memcpy(embeddings, m->embeddings + token * c->n_embed, c->n_embed * sizeof(__bf16));
 
     // tensor([[151644,    872,    198,   1944, 151645,    198, 151644,  77091,    198]])
 
     __bf16 cos[64] = {}, sin[64] = {};
 
-    rope_forward(&rope, 1, cos, sin);
+    rope_forward(&c->d.rope, 1, cos, sin);
 
     input_layernorm(embeddings2, embeddings, c, m);
+    self_attention(embeddings, embeddings2, x, 0, 0);
 
     volatile int dummy = 0;
 }
