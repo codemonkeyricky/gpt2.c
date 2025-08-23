@@ -21,6 +21,12 @@ struct Derived {
 struct Config {
     int vocab_size;
     int n_embed;
+    int n_heads;
+    int g_heads;
+    int kv_heads;
+    int n_layers;
+    int seq_len;
+
     struct Derived d;
 };
 
@@ -39,9 +45,13 @@ struct Mmapping {
     struct Layer *layers;
 };
 
+typedef struct {
+    __bf16 *cache;
+} Head;
+
 struct RLayer {
-    __bf16 *k_cache;
-    __bf16 *v_cache;
+    Head *key;
+    Head *value;
 };
 
 struct Runtime {
@@ -181,6 +191,10 @@ void mmap_init(struct Config *config, struct Mmapping *mmapping) {
 void config_init(struct Config *config) {
     config->vocab_size = 152064;
     config->n_embed = 2048;
+    config->n_heads = 16;
+    config->kv_heads = 2;
+    config->n_layers = 36;
+    config->seq_len = 1024; /* TODO: */
 
     rope_init(config);
 }
@@ -262,6 +276,14 @@ void self_attention(__bf16 *__restrict xout, __bf16 *__restrict x, const struct 
     matmul_bias(r->k, x, kw, kb, p->n_embed, 256);
     matmul_bias(r->v, x, vw, vb, p->n_embed, 256);
 
+    int n_heads = 16, kv_heads = 2;
+
+    size_t hs = 128;
+    for (size_t h = 0; h < 2; h++) {
+        memcpy(r->layers[layer].key[h].cache + pos * hs, r->k + h * hs, hs * sizeof(__bf16));
+        memcpy(r->layers[layer].value[h].cache + pos * hs, r->v + h * hs, hs * sizeof(__bf16));
+    }
+
     volatile int dummy = 0;
 
 #if 0
@@ -342,6 +364,16 @@ void runtime_init(struct Transformer *xfmr) {
     r->q = (__bf16 *)malloc(sizeof(__bf16) * c->n_embed);
     r->k = (__bf16 *)malloc(sizeof(__bf16) * 256);
     r->v = (__bf16 *)malloc(sizeof(__bf16) * 256);
+
+    for (size_t i = 0; i < c->n_layers; i++) {
+        r->layers[i].key = (Head *)calloc(sizeof(Head), 2);
+        r->layers[i].value = (Head *)calloc(sizeof(Head), 2);
+        for (size_t j = 0; j < 2; ++j) {
+            /* TODO: parameterized 2 and 128, relating to group heads  */
+            r->layers[i].key[j].cache = (__bf16 *)calloc(sizeof(__bf16), c->seq_len * 128);
+            r->layers[i].value[j].cache = (__bf16 *)calloc(sizeof(__bf16), c->seq_len * 128);
+        }
+    }
 }
 
 int main() {
