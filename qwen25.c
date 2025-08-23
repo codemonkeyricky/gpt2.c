@@ -24,8 +24,13 @@ struct Config {
     struct Derived d;
 };
 
+struct Layer {
+    const __bf16 *input_layernorm;
+};
+
 struct Mmapping {
     const __bf16 *embeddings;
+    struct Layer *layers;
 };
 
 void rope_init(struct Config *c) {
@@ -87,12 +92,23 @@ void rope_forward(struct RotaryPosEmb *rope, int seq_len, __bf16 *cos, __bf16 *s
     }
 }
 
-void mmap_init(struct Mmapping *mmapping) {
+void mmap_init(struct Config *config, struct Mmapping *mmapping) {
     int fd = open("embeddings.bin", O_RDONLY);
     assert(fd > -1);
     int file_size = lseek(fd, 0, SEEK_END);
     lseek(fd, 0, SEEK_SET);
     mmapping->embeddings = (__bf16 *)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    close(fd);
+
+    mmapping->layers = (struct Layer *)malloc(sizeof(struct Layer) * 28);
+
+    struct Layer *l0 = &mmapping->layers[0];
+
+    fd = open("layer_0_input_layernorm.bin", O_RDONLY);
+    assert(fd > -1);
+    file_size = lseek(fd, 0, SEEK_END);
+    lseek(fd, 0, SEEK_SET);
+    l0->input_layernorm = (__bf16 *)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
     close(fd);
 }
 
@@ -103,18 +119,55 @@ void config_init(struct Config *config) {
     rope_init(config);
 }
 
+void input_layernorm(__bf16 *out, const __bf16 *in, struct Config *c, struct Mmapping *m) {
+    const __bf16 *weight = m->layers[0].input_layernorm;
+    // const __bf16 *bias = m->layers[0].input_layernorm_bias;
+
+    // mean = x.mean(-1, keepdim=True)
+    // variance = x.var(-1, keepdim=True, unbiased=False)
+    // x = (x - mean) / torch.sqrt(variance + self.variance_epsilon)
+    // return x * self.weight + self.bias
+
+    float mean = 0.0f;
+    for (int i = 0; i < c->n_embed; i++) {
+        mean += (float)in[i];
+    }
+    mean /= (float)c->n_embed;
+
+    float variance = 0.0f;
+    for (int i = 0; i < c->n_embed; i++) {
+        float diff = (float)in[i] - mean;
+        variance += diff * diff;
+    }
+    variance /= (float)c->n_embed;
+
+    // def forward(self, x):
+    //     input_dtype = x.dtype
+    //     x = x.to(torch.float32)
+    //     variance = x.pow(2).mean(-1, keepdim=True)
+    //     x = x * torch.rsqrt(variance + self.variance_epsilon)
+    //     return self.weight * x.to(input_dtype)
+
+    float denom = 1.0f / sqrtf(variance + 1e-6f);
+
+    for (int i = 0; i < c->n_embed; i++) {
+        out[i] = (__bf16)(in[i] * denom * (float)weight[i]);
+    }
+}
+
 int main() {
 
     struct Mmapping mmapping = {};
     struct Config config = {};
     struct RotaryPosEmb rope = {};
 
-    mmap_init(&mmapping);
     config_init(&config);
+    mmap_init(&config, &mmapping);
 
     struct Config *c = &config;
+    struct Mmapping *m = &mmapping;
 
-    __bf16 embeddings[c->n_embed] = {};
+    __bf16 embeddings[c->n_embed] = {}, embeddings2[c->n_embed] = {};
 
     int token = 151644;
     memcpy(embeddings, mmapping.embeddings + token * c->n_embed, c->n_embed * sizeof(__bf16));
@@ -124,6 +177,8 @@ int main() {
     __bf16 cos[64] = {}, sin[64] = {};
 
     rope_forward(&rope, 1, cos, sin);
+
+    input_layernorm(embeddings2, embeddings, c, m);
 
     volatile int dummy = 0;
 }
