@@ -125,6 +125,27 @@ void mmap_init(struct Config *config, struct Mmapping *mmapping) {
     lseek(fd, 0, SEEK_SET);
     l0->input_layernorm = (__bf16 *)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
     close(fd);
+
+    fd = open("layer_0_q_proj.bin", O_RDONLY);
+    assert(fd > -1);
+    file_size = lseek(fd, 0, SEEK_END);
+    lseek(fd, 0, SEEK_SET);
+    l0->v_proj = (__bf16 *)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    close(fd);
+
+    fd = open("layer_0_k_proj.bin", O_RDONLY);
+    assert(fd > -1);
+    file_size = lseek(fd, 0, SEEK_END);
+    lseek(fd, 0, SEEK_SET);
+    l0->k_proj = (__bf16 *)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    close(fd);
+
+    fd = open("layer_0_v_proj.bin", O_RDONLY);
+    assert(fd > -1);
+    file_size = lseek(fd, 0, SEEK_END);
+    lseek(fd, 0, SEEK_SET);
+    l0->v_proj = (__bf16 *)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    close(fd);
 }
 
 void config_init(struct Config *config) {
