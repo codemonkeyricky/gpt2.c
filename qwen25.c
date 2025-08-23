@@ -39,10 +39,16 @@ struct Mmapping {
     struct Layer *layers;
 };
 
+struct RLayer {
+    __bf16 *k_cache;
+    __bf16 *v_cache;
+};
+
 struct Runtime {
     __bf16 *q;
     __bf16 *k;
     __bf16 *v;
+    struct RLayer *layers;
 };
 
 struct Transformer {
