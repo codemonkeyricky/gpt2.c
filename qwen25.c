@@ -220,10 +220,11 @@ void matmul(__bf16 *__restrict xout_in, const __bf16 *__restrict x_in, const __b
     const __bf16 *x = x_in;
     const __bf16 *w = w_in;
     for (int i = 0; i < d; i++) {
-        xout[i] = 0;
+        float sum = 0.0f;
         for (int j = 0; j < n; j++) {
-            xout[i] += w[i * n + j] * x[j];
+            sum += (float)w[i * n + j] * (float)x[j];
         }
+        xout[i] = (__bf16)sum;
     }
 }
 
@@ -244,10 +245,18 @@ void self_attention(__bf16 *__restrict xout, __bf16 *__restrict x, const struct 
     const __bf16 *qw = m->layers[layer].q_proj_w; // weight for the query projection
     const __bf16 *qb = m->layers[layer].q_proj_b; // bias for the query projection
 
+    const __bf16 *kw = m->layers[layer].k_proj_w; // weight for the key projection
+    const __bf16 *kb = m->layers[layer].k_proj_b; // bias for the key projection
+
+    const __bf16 *vw = m->layers[layer].v_proj_w; // weight for the value projection
+    const __bf16 *vb = m->layers[layer].v_proj_b; // bias for the value projection
+
     /* attention weight and bias */
     matmul_bias(r->q, x, qw, qb, p->n_embed, p->n_embed);
-    // matmul(r->k, x, m->layers[layer].k_proj, p->n_embed, 256);
-    // matmul(r->v, x, m->layers[layer].v_proj, p->n_embed, 256);
+    matmul_bias(r->k, x, kw, kb, p->n_embed, 256);
+    matmul_bias(r->v, x, vw, vb, p->n_embed, 256);
+
+    volatile int dummy = 0;
 
 #if 0
     /* split attention into q, k, v */
