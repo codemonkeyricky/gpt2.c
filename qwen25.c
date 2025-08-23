@@ -26,9 +26,12 @@ struct Config {
 
 struct Layer {
     const __bf16 *input_layernorm;
-    const __bf16 *q_proj;
-    const __bf16 *k_proj;
-    const __bf16 *v_proj;
+    const __bf16 *q_proj_w;
+    const __bf16 *q_proj_b;
+    const __bf16 *k_proj_w;
+    const __bf16 *k_proj_b;
+    const __bf16 *v_proj_w;
+    const __bf16 *v_proj_b;
 };
 
 struct Mmapping {
@@ -126,25 +129,25 @@ void mmap_init(struct Config *config, struct Mmapping *mmapping) {
     l0->input_layernorm = (__bf16 *)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
     close(fd);
 
-    fd = open("layer_0_q_proj.bin", O_RDONLY);
+    fd = open("layer_0_q_proj_w.bin", O_RDONLY);
     assert(fd > -1);
     file_size = lseek(fd, 0, SEEK_END);
     lseek(fd, 0, SEEK_SET);
-    l0->q_proj = (__bf16 *)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    l0->q_proj_w = (__bf16 *)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
     close(fd);
 
-    fd = open("layer_0_k_proj.bin", O_RDONLY);
+    fd = open("layer_0_k_proj_w.bin", O_RDONLY);
     assert(fd > -1);
     file_size = lseek(fd, 0, SEEK_END);
     lseek(fd, 0, SEEK_SET);
-    l0->k_proj = (__bf16 *)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    l0->k_proj_w = (__bf16 *)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
     close(fd);
 
-    fd = open("layer_0_v_proj.bin", O_RDONLY);
+    fd = open("layer_0_v_proj_w.bin", O_RDONLY);
     assert(fd > -1);
     file_size = lseek(fd, 0, SEEK_END);
     lseek(fd, 0, SEEK_SET);
-    l0->v_proj = (__bf16 *)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    l0->v_proj_w = (__bf16 *)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
     close(fd);
 }
 
@@ -203,6 +206,13 @@ void matmul(__bf16 *__restrict xout_in, const __bf16 *__restrict x_in, const __b
     }
 }
 
+void matmul_bias(__bf16 *out, const __bf16 *x, const __bf16 *w, const __bf16 *b, int n, int d) {
+    matmul(out, x, w, n, d);
+    for (size_t i = 0; i < d; i++) {
+        out[i] += b[i];
+    }
+}
+
 void self_attention(__bf16 *__restrict xout, __bf16 *__restrict x, const struct Transformer *xfmr, const int layer,
                     const int pos) {
 
@@ -210,10 +220,13 @@ void self_attention(__bf16 *__restrict xout, __bf16 *__restrict x, const struct 
     const struct Runtime *r = &xfmr->runtime;
     const struct Mmapping *m = &xfmr->mmapping;
 
+    const __bf16 *qw = m->layers[layer].q_proj_w; // weight for the query projection
+    const __bf16 *qb = m->layers[layer].q_proj_b; // bias for the query projection
+
     /* attention weight and bias */
-    matmul(r->q, x, m->layers[layer].q_proj, p->n_embed, p->n_embed);
-    matmul(r->k, x, m->layers[layer].k_proj, p->n_embed, 256);
-    matmul(r->v, x, m->layers[layer].v_proj, p->n_embed, 256);
+    matmul_bias(r->q, x, qw, qb, p->n_embed, p->n_embed);
+    // matmul(r->k, x, m->layers[layer].k_proj, p->n_embed, 256);
+    // matmul(r->v, x, m->layers[layer].v_proj, p->n_embed, 256);
 
 #if 0
     /* split attention into q, k, v */
