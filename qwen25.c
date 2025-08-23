@@ -130,7 +130,7 @@ void mmap_init(struct Config *config, struct Mmapping *mmapping) {
     assert(fd > -1);
     file_size = lseek(fd, 0, SEEK_END);
     lseek(fd, 0, SEEK_SET);
-    l0->v_proj = (__bf16 *)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    l0->q_proj = (__bf16 *)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
     close(fd);
 
     fd = open("layer_0_k_proj.bin", O_RDONLY);
@@ -285,6 +285,16 @@ void self_attention(__bf16 *__restrict xout, __bf16 *__restrict x, const struct 
 #endif
 }
 
+void runtime_init(struct Transformer *xfmr) {
+
+    const struct Config *c = &xfmr->config;
+    struct Runtime *r = &xfmr->runtime;
+
+    r->q = (__bf16 *)malloc(sizeof(__bf16) * c->n_embed);
+    r->k = (__bf16 *)malloc(sizeof(__bf16) * 256);
+    r->v = (__bf16 *)malloc(sizeof(__bf16) * 256);
+}
+
 int main() {
 
     // struct Mmapping mmapping = {};
@@ -298,6 +308,7 @@ int main() {
 
     config_init(c);
     mmap_init(c, m);
+    runtime_init(x);
 
     __bf16 embeddings[c->n_embed] = {}, embeddings2[c->n_embed] = {};
 
