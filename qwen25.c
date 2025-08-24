@@ -333,6 +333,54 @@ void self_attention(__bf16 *__restrict xout, __bf16 *__restrict x, const struct 
         memcpy(r->layers[layer].value[h].cache + pos * hs, r->v + h * hs, hs * sizeof(__bf16));
     }
 
+    /* Calculate attention score */
+    __bf16 att[pos + 1] = {};
+    __bf16 *y = xout;
+    memset(y, 0, p->n_embed * sizeof(__bf16)); // clear output buffer
+    for (int h = 0; h < p->n_heads; h++) {
+
+        /* find the query head */
+        const __bf16 *qq = r->q + h * hs; // (1, hs)
+        for (int t = 0; t <= pos; t++) {
+            __bf16 *kk = r->layers[layer].key[h % kv_heads].cache + t * hs; // (T, hs)
+            __bf16 score = 0.0f;
+            for (int i = 0; i < hs; i++) {
+                score += qq[i] * kk[i];
+            }
+            att[t] = score;
+        }
+
+        for (int t = 0; t <= pos; t++) {
+            att[t] /= sqrtf(hs);
+        }
+
+        /* soft max */
+
+        float max_att = att[0];
+        for (int t = 1; t <= pos; t++) {
+            if (att[t] > max_att)
+                max_att = att[t];
+        }
+        float sum_exp = 0.0f;
+        for (int t = 0; t <= pos; t++) {
+            att[t] = expf(att[t] - max_att);
+            sum_exp += att[t];
+        }
+        for (int t = 0; t <= pos; t++) {
+            att[t] /= sum_exp;
+        }
+
+        /* y = att @ v // (1, T) x (T, hs) -> (1, hs) */
+        for (int i = 0; i < hs; i++) {
+            __bf16 *vv = r->layers[layer].value[h % kv_heads].cache;
+            __bf16 *yy = y + h * hs; // (1, hs)
+            for (int t = 0; t <= pos; t++) {
+                /* find v for the current head */
+                yy[i] += att[t] * vv[t * hs + i];
+            }
+        }
+    }
+
     volatile int dummy = 0;
 
 #if 0
@@ -453,7 +501,7 @@ int main() {
 
     // tensor([[151644,    872,    198,   1944, 151645,    198, 151644,  77091,    198]])
 
-    __bf16 cos[64] = {}, sin[64] = {};
+    __bf16 cos[128] = {}, sin[128] = {};
 
     rope_forward(&c->d.rope, 1, cos, sin);
 
