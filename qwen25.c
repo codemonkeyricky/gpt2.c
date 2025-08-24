@@ -343,11 +343,11 @@ void self_attention(__bf16 *__restrict xout, __bf16 *__restrict x, const struct 
         const __bf16 *qq = r->q + h * hs; // (1, hs)
         for (int t = 0; t <= pos; t++) {
             __bf16 *kk = r->layers[layer].key[h % kv_heads].cache + t * hs; // (T, hs)
-            __bf16 score = 0.0f;
+            float score = 0.0f;
             for (int i = 0; i < hs; i++) {
-                score += qq[i] * kk[i];
+                score += (float)qq[i] * (float)kk[i];
             }
-            att[t] = score;
+            att[t] = (__bf16)score;
         }
 
         for (int t = 0; t <= pos; t++) {
