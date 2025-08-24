@@ -23,6 +23,7 @@ struct Config {
     int n_embed;
     int n_heads;
     int g_heads;
+    int n_head_dim;
     int kv_heads;
     int n_layers;
     int seq_len;
@@ -195,6 +196,7 @@ void config_init(struct Config *config) {
     config->kv_heads = 2;
     config->n_layers = 36;
     config->seq_len = 1024; /* TODO: */
+    config->n_head_dim = 128;
 
     rope_init(config);
 }
@@ -255,8 +257,45 @@ void matmul_bias(__bf16 *out, const __bf16 *x, const __bf16 *w, const __bf16 *b,
     }
 }
 
+void mul(__bf16 *out, const __bf16 *a, const __bf16 *b, int n) {
+    for (int i = 0; i < n; i++) {
+        out[i] = (__bf16)((float)a[i] * (float)b[i]);
+    }
+}
+
+void add(__bf16 *out, const __bf16 *a, const __bf16 *b, int n) {
+    for (int i = 0; i < n; i++) {
+        out[i] = (__bf16)((float)a[i] + (float)b[i]);
+    }
+}
+
+void rotate_half(__bf16 *out, const __bf16 *x, int D) {
+    int half = D / 2;
+    for (int i = 0; i < half; i++) {
+        out[i] = -x[i + half]; // Negate the second half and put it in the first half
+        out[i + half] = x[i];  // Copy the first half to the second half
+    }
+}
+
+void rotary_positional_embedding(__bf16 *emb, __bf16 *cos, __bf16 *sin, const struct Transformer *x) {
+    __bf16 *in = emb;
+    __bf16 *out = NULL, *out2 = NULL, *out3 = NULL;
+
+    int n = x->config.n_head_dim;
+
+    /* a = rotate_half(q) * sin */
+    rotate_half(out, in, n);
+    mul(out2, out, sin, n);
+
+    /* b = q * cos */
+    mul(out, in, cos, n);
+
+    /* a + b */
+    add(out3, out, out2, n);
+}
+
 void self_attention(__bf16 *__restrict xout, __bf16 *__restrict x, const struct Transformer *xfmr, const int layer,
-                    const int pos) {
+                    const int pos, __bf16 *sin, __bf16 *cos) {
 
     const struct Config *p = &xfmr->config;
     const struct Runtime *r = &xfmr->runtime;
@@ -276,7 +315,12 @@ void self_attention(__bf16 *__restrict xout, __bf16 *__restrict x, const struct 
     matmul_bias(r->k, x, kw, kb, p->n_embed, 256);
     matmul_bias(r->v, x, vw, vb, p->n_embed, 256);
 
+    rotary_positional_embedding(r->q, sin, cos, xfmr);
+    rotary_positional_embedding(r->k, sin, cos, xfmr);
+
     int n_heads = 16, kv_heads = 2;
+
+    /* insert to kv cache */
 
     size_t hs = 128;
     for (size_t h = 0; h < 2; h++) {
@@ -403,7 +447,7 @@ int main() {
     rope_forward(&c->d.rope, 1, cos, sin);
 
     input_layernorm(embeddings2, embeddings, c, m);
-    self_attention(embeddings, embeddings2, x, 0, 0);
+    self_attention(embeddings, embeddings2, x, 0, 0, sin, cos);
 
     volatile int dummy = 0;
 }
