@@ -39,6 +39,7 @@ struct Layer {
     const __bf16 *k_proj_b;
     const __bf16 *v_proj_w;
     const __bf16 *v_proj_b;
+    const __bf16 *o_proj_w;
 };
 
 struct Mmapping {
@@ -189,6 +190,13 @@ void mmap_init(struct Config *config, struct Mmapping *mmapping) {
     file_size = lseek(fd, 0, SEEK_END);
     lseek(fd, 0, SEEK_SET);
     l0->v_proj_b = (__bf16 *)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    close(fd);
+
+    fd = open("layer_0_o_proj_w.bin", O_RDONLY);
+    assert(fd > -1);
+    file_size = lseek(fd, 0, SEEK_END);
+    lseek(fd, 0, SEEK_SET);
+    l0->o_proj_w = (__bf16 *)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
     close(fd);
 }
 
@@ -381,76 +389,13 @@ void self_attention(__bf16 *__restrict xout, __bf16 *__restrict x, const struct 
         }
     }
 
+    /* TODO */
+    // memcpy(x, y, p->dim * sizeof(float));
+    // ww = w->h[layer].att.c_attn_proj_w; // weight for the projection
+    // bb = w->h[layer].att.c_attn_proj_b; // bias for the projection
+    // matmul_bias(y, x, ww, bb, p->dim, p->dim);
+
     volatile int dummy = 0;
-
-#if 0
-    /* split attention into q, k, v */
-    const float *q = attn;
-    const float *k = attn + p->dim;     // key
-    const float *v = attn + p->dim * 2; // value
-
-    /* Append current key/value to the cache */
-    size_t hs = p->dim / p->n_heads;
-    for (size_t h = 0; h < p->n_heads; h++) {
-        memcpy(s->layers[layer].key[h].cache + pos * hs, k + h * hs, hs * sizeof(float));
-        memcpy(s->layers[layer].value[h].cache + pos * hs, v + h * hs, hs * sizeof(float));
-    }
-
-    float *y = xout;
-    memset(y, 0, p->dim * sizeof(float)); // clear output buffer
-
-    /* Calculate attention score */
-    float att[pos + 1] = {};
-    for (int h = 0; h < p->n_heads; h++) {
-
-        /* find the query head */
-        const float *qq = q + h * hs; // (1, hs)
-        for (int t = 0; t <= pos; t++) {
-            float *kk = s->layers[layer].key[h].cache + t * hs; // (T, hs)
-            float score = 0.0f;
-            for (int i = 0; i < hs; i++) {
-                score += qq[i] * kk[i];
-            }
-            att[t] = score;
-        }
-
-        for (int t = 0; t <= pos; t++) {
-            att[t] /= sqrtf(hs);
-        }
-
-        /* soft max */
-
-        float max_att = att[0];
-        for (int t = 1; t <= pos; t++) {
-            if (att[t] > max_att)
-                max_att = att[t];
-        }
-        float sum_exp = 0.0f;
-        for (int t = 0; t <= pos; t++) {
-            att[t] = expf(att[t] - max_att);
-            sum_exp += att[t];
-        }
-        for (int t = 0; t <= pos; t++) {
-            att[t] /= sum_exp;
-        }
-
-        /* y = att @ v // (1, T) x (T, hs) -> (1, hs) */
-        for (int i = 0; i < hs; i++) {
-            float *vv = s->layers[layer].value[h].cache;
-            float *yy = y + h * hs; // (1, hs)
-            for (int t = 0; t <= pos; t++) {
-                /* find v for the current head */
-                yy[i] += att[t] * vv[t * hs + i];
-            }
-        }
-    }
-
-    memcpy(x, y, p->dim * sizeof(float));
-
-    ww = w->h[layer].att.c_attn_proj_w; // weight for the projection
-    bb = w->h[layer].att.c_attn_proj_b; // bias for the projection
-    matmul_bias(y, x, ww, bb, p->dim, p->dim);
-#endif
 }
 
 void runtime_init(struct Transformer *xfmr) {
