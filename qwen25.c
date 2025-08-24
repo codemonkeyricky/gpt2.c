@@ -59,6 +59,9 @@ struct Runtime {
     __bf16 *q;
     __bf16 *k;
     __bf16 *v;
+    __bf16 *h1;
+    __bf16 *h2;
+    __bf16 *h3;
     struct RLayer *layers;
 };
 
@@ -279,7 +282,9 @@ void rotate_half(__bf16 *out, const __bf16 *x, int D) {
 
 void rotary_positional_embedding(__bf16 *emb, __bf16 *cos, __bf16 *sin, const struct Transformer *x) {
     __bf16 *in = emb;
-    __bf16 *out = NULL, *out2 = NULL, *out3 = NULL;
+    __bf16 *out = x->runtime.h1;
+    __bf16 *out2 = x->runtime.h2;
+    __bf16 *out3 = x->runtime.h3;
 
     int n = x->config.n_head_dim;
 
@@ -292,6 +297,8 @@ void rotary_positional_embedding(__bf16 *emb, __bf16 *cos, __bf16 *sin, const st
 
     /* a + b */
     add(out3, out, out2, n);
+
+    memcpy(emb, out3, n * sizeof(__bf16));
 }
 
 void self_attention(__bf16 *__restrict xout, __bf16 *__restrict x, const struct Transformer *xfmr, const int layer,
@@ -315,8 +322,8 @@ void self_attention(__bf16 *__restrict xout, __bf16 *__restrict x, const struct 
     matmul_bias(r->k, x, kw, kb, p->n_embed, 256);
     matmul_bias(r->v, x, vw, vb, p->n_embed, 256);
 
-    rotary_positional_embedding(r->q, sin, cos, xfmr);
-    rotary_positional_embedding(r->k, sin, cos, xfmr);
+    rotary_positional_embedding(r->q, cos, sin, xfmr);
+    rotary_positional_embedding(r->k, cos, sin, xfmr);
 
     int n_heads = 16, kv_heads = 2;
 
@@ -408,6 +415,12 @@ void runtime_init(struct Transformer *xfmr) {
     r->q = (__bf16 *)malloc(sizeof(__bf16) * c->n_embed);
     r->k = (__bf16 *)malloc(sizeof(__bf16) * 256);
     r->v = (__bf16 *)malloc(sizeof(__bf16) * 256);
+
+    r->h1 = (__bf16 *)malloc(sizeof(__bf16) * 256);
+    r->h2 = (__bf16 *)malloc(sizeof(__bf16) * 256);
+    r->h3 = (__bf16 *)malloc(sizeof(__bf16) * 256);
+
+    r->layers = (struct RLayer *)calloc(sizeof(struct RLayer), c->n_layers);
 
     for (size_t i = 0; i < c->n_layers; i++) {
         r->layers[i].key = (Head *)calloc(sizeof(Head), 2);
