@@ -337,6 +337,7 @@ void self_attention(__bf16 *__restrict xout, __bf16 *__restrict x, const struct 
 
     /* insert to kv cache */
     int n_heads = 16, kv_heads = 2;
+    int index = n_heads / kv_heads;
     size_t hs = 128;
     for (size_t h = 0; h < 2; h++) {
         memcpy(r->layers[layer].key[h].cache + pos * hs, r->k + h * hs, hs * sizeof(__bf16));
@@ -352,7 +353,7 @@ void self_attention(__bf16 *__restrict xout, __bf16 *__restrict x, const struct 
         /* find the query head */
         const __bf16 *qq = r->q + h * hs; // (1, hs)
         for (int t = 0; t <= pos; t++) {
-            __bf16 *kk = r->layers[layer].key[h % kv_heads].cache + t * hs; // (T, hs)
+            __bf16 *kk = r->layers[layer].key[h / index].cache + t * hs; // (T, hs)
             float score = 0.0f;
             for (int i = 0; i < hs; i++) {
                 score += (float)qq[i] * (float)kk[i];
@@ -382,7 +383,7 @@ void self_attention(__bf16 *__restrict xout, __bf16 *__restrict x, const struct 
 
         /* y = att @ v // (1, T) x (T, hs) -> (1, hs) */
         for (int i = 0; i < hs; i++) {
-            __bf16 *vv = r->layers[layer].value[h % kv_heads].cache;
+            __bf16 *vv = r->layers[layer].value[h / index].cache;
             __bf16 *yy = y + h * hs; // (1, hs)
             for (int t = 0; t <= pos; t++) {
                 /* find v for the current head */
