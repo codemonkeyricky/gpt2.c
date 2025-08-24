@@ -325,6 +325,8 @@ void self_attention(__bf16 *__restrict xout, __bf16 *__restrict x, const struct 
     const __bf16 *vw = m->layers[layer].v_proj_w; // weight for the value projection
     const __bf16 *vb = m->layers[layer].v_proj_b; // bias for the value projection
 
+    const __bf16 *ow = m->layers[layer].o_proj_w; // weight for the output projection
+
     /* attention weight and bias */
     matmul_bias(r->q, x, qw, qb, p->n_embed, p->n_embed);
     matmul_bias(r->k, x, kw, kb, p->n_embed, 256);
@@ -390,10 +392,8 @@ void self_attention(__bf16 *__restrict xout, __bf16 *__restrict x, const struct 
     }
 
     /* TODO */
-    // memcpy(x, y, p->dim * sizeof(float));
-    // ww = w->h[layer].att.c_attn_proj_w; // weight for the projection
-    // bb = w->h[layer].att.c_attn_proj_b; // bias for the projection
-    // matmul_bias(y, x, ww, bb, p->dim, p->dim);
+    memcpy(x, y, p->n_embed * sizeof(__bf16));
+    matmul(y, x, ow, p->n_embed, p->n_embed);
 
     volatile int dummy = 0;
 }
