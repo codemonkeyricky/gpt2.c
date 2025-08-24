@@ -325,10 +325,8 @@ void self_attention(__bf16 *__restrict xout, __bf16 *__restrict x, const struct 
     rotary_positional_embedding(r->q, cos, sin, xfmr);
     rotary_positional_embedding(r->k, cos, sin, xfmr);
 
-    int n_heads = 16, kv_heads = 2;
-
     /* insert to kv cache */
-
+    int n_heads = 16, kv_heads = 2;
     size_t hs = 128;
     for (size_t h = 0; h < 2; h++) {
         memcpy(r->layers[layer].key[h].cache + pos * hs, r->k + h * hs, hs * sizeof(__bf16));
