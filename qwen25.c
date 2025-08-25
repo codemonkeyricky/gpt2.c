@@ -94,34 +94,6 @@ void rope_init(struct Config *c) {
     }
 }
 
-// {
-//   "architectures": [
-//     "Qwen2ForCausalLM"
-//   ],
-//   "attention_dropout": 0.0,
-//   "bos_token_id": 151643,
-//   "eos_token_id": 151645,
-//   "hidden_act": "silu",
-//   "hidden_size": 3584,
-//   "initializer_range": 0.02,
-//   "intermediate_size": 18944,
-//   "max_position_embeddings": 32768,
-//   "max_window_layers": 28,
-//   "model_type": "qwen2",
-//   "num_attention_heads": 28,
-//   "num_hidden_layers": 28,
-//   "num_key_value_heads": 4,
-//   "rms_norm_eps": 1e-06,
-//   "rope_theta": 1000000.0,
-//   "sliding_window": 131072,
-//   "tie_word_embeddings": false,
-//   "torch_dtype": "bfloat16",
-//   "transformers_version": "4.43.1",
-//   "use_cache": true,
-//   "use_sliding_window": false,
-//   "vocab_size": 152064
-// }
-
 void rope_forward(struct RotaryPosEmb *rope, int seq_len, __bf16 *cos, __bf16 *sin) {
     // position_ids = torch.arange(seq_len, dtype=torch.float).to(device)
     // freqs = position_ids[:, None] * self.inv_freq[None, :]
@@ -135,6 +107,44 @@ void rope_forward(struct RotaryPosEmb *rope, int seq_len, __bf16 *cos, __bf16 *s
     }
 }
 
+void mmap_layer(struct Transformer *x, int layer) {
+
+    struct Layer *l = &x->mmapping.layers[layer];
+
+    struct mmap_lookup {
+        const char *path;
+        const __bf16 **mmap;
+    };
+
+    struct mmap_lookup lookup[] = {
+        {"layer_%d_input_layernorm.bin", &l->input_layernorm},
+        {"layer_%d_q_proj_w.bin", &l->q_proj_w},
+        {"layer_%d_k_proj_w.bin", &l->k_proj_w},
+        {"layer_%d_v_proj_w.bin", &l->v_proj_w},
+        {"layer_%d_q_proj_b.bin", &l->q_proj_b},
+        {"layer_%d_k_proj_b.bin", &l->k_proj_b},
+        {"layer_%d_v_proj_b.bin", &l->v_proj_b},
+        {"layer_%d_o_proj_w.bin", &l->o_proj_w},
+        {"layer_%d_post_attention_layernorm.bin", &l->post_attn_layernorm},
+        {"layer_%d_mlp_down_proj.bin", &l->mlp_down_proj},
+        {"layer_%d_mlp_up_proj.bin", &l->mlp_up_proj},
+        {"layer_%d_mlp_gate_proj.bin", &l->mlp_gate_proj},
+    };
+
+    for (ssize_t i = 0; i < sizeof(lookup) / sizeof(lookup[0]); i++) {
+
+        char path[FILENAME_MAX];
+        snprintf(path, FILENAME_MAX, lookup[i].path, layer);
+
+        int fd = open(path, O_RDONLY);
+        assert(fd > -1);
+        int file_size = lseek(fd, 0, SEEK_END);
+        lseek(fd, 0, SEEK_SET);
+        *lookup[i].mmap = (const __bf16 *)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
+        close(fd);
+    }
+}
+
 void mmap_init(struct Config *config, struct Mmapping *mmapping) {
     int fd = open("embeddings.bin", O_RDONLY);
     assert(fd > -1);
@@ -143,93 +153,11 @@ void mmap_init(struct Config *config, struct Mmapping *mmapping) {
     mmapping->embeddings = (__bf16 *)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
     close(fd);
 
-    mmapping->layers = (struct Layer *)malloc(sizeof(struct Layer) * 28);
+    mmapping->layers = (struct Layer *)malloc(sizeof(struct Layer) * config->n_layers);
 
-    struct Layer *l0 = &mmapping->layers[0];
-
-    fd = open("layer_0_input_layernorm.bin", O_RDONLY);
-    assert(fd > -1);
-    file_size = lseek(fd, 0, SEEK_END);
-    lseek(fd, 0, SEEK_SET);
-    l0->input_layernorm = (__bf16 *)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
-    close(fd);
-
-    fd = open("layer_0_q_proj_w.bin", O_RDONLY);
-    assert(fd > -1);
-    file_size = lseek(fd, 0, SEEK_END);
-    lseek(fd, 0, SEEK_SET);
-    l0->q_proj_w = (__bf16 *)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
-    close(fd);
-
-    fd = open("layer_0_k_proj_w.bin", O_RDONLY);
-    assert(fd > -1);
-    file_size = lseek(fd, 0, SEEK_END);
-    lseek(fd, 0, SEEK_SET);
-    l0->k_proj_w = (__bf16 *)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
-    close(fd);
-
-    fd = open("layer_0_v_proj_w.bin", O_RDONLY);
-    assert(fd > -1);
-    file_size = lseek(fd, 0, SEEK_END);
-    lseek(fd, 0, SEEK_SET);
-    l0->v_proj_w = (__bf16 *)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
-    close(fd);
-
-    fd = open("layer_0_q_proj_b.bin", O_RDONLY);
-    assert(fd > -1);
-    file_size = lseek(fd, 0, SEEK_END);
-    lseek(fd, 0, SEEK_SET);
-    l0->q_proj_b = (__bf16 *)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
-    close(fd);
-
-    fd = open("layer_0_k_proj_b.bin", O_RDONLY);
-    assert(fd > -1);
-    file_size = lseek(fd, 0, SEEK_END);
-    lseek(fd, 0, SEEK_SET);
-    l0->k_proj_b = (__bf16 *)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
-    close(fd);
-
-    fd = open("layer_0_v_proj_b.bin", O_RDONLY);
-    assert(fd > -1);
-    file_size = lseek(fd, 0, SEEK_END);
-    lseek(fd, 0, SEEK_SET);
-    l0->v_proj_b = (__bf16 *)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
-    close(fd);
-
-    fd = open("layer_0_o_proj_w.bin", O_RDONLY);
-    assert(fd > -1);
-    file_size = lseek(fd, 0, SEEK_END);
-    lseek(fd, 0, SEEK_SET);
-    l0->o_proj_w = (__bf16 *)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
-    close(fd);
-
-    fd = open("layer_0_post_attention_layernorm.bin", O_RDONLY);
-    assert(fd > -1);
-    file_size = lseek(fd, 0, SEEK_END);
-    lseek(fd, 0, SEEK_SET);
-    l0->post_attn_layernorm = (__bf16 *)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
-    close(fd);
-
-    fd = open("layer_0_mlp_down_proj.bin", O_RDONLY);
-    assert(fd > -1);
-    file_size = lseek(fd, 0, SEEK_END);
-    lseek(fd, 0, SEEK_SET);
-    l0->mlp_down_proj = (__bf16 *)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
-    close(fd);
-
-    fd = open("layer_0_mlp_up_proj.bin", O_RDONLY);
-    assert(fd > -1);
-    file_size = lseek(fd, 0, SEEK_END);
-    lseek(fd, 0, SEEK_SET);
-    l0->mlp_up_proj = (__bf16 *)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
-    close(fd);
-
-    fd = open("layer_0_mlp_gate_proj.bin", O_RDONLY);
-    assert(fd > -1);
-    file_size = lseek(fd, 0, SEEK_END);
-    lseek(fd, 0, SEEK_SET);
-    l0->mlp_gate_proj = (__bf16 *)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
-    close(fd);
+    for (int i = 0; i < config->n_layers; i++) {
+        mmap_layer((struct Transformer *)config, i);
+    }
 }
 
 void config_init(struct Config *config) {
