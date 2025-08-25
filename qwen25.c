@@ -444,7 +444,7 @@ int main() {
     mmap_init(c, m);
     runtime_init(x);
 
-    __bf16 embeddings[c->n_embed] = {}, embeddings2[c->n_embed] = {};
+    __bf16 embeddings[c->n_embed] = {}, embeddings2[c->n_embed] = {}, skip[c->n_embed] = {};
 
     int token = 151644;
     memcpy(embeddings, m->embeddings + token * c->n_embed, c->n_embed * sizeof(__bf16));
@@ -455,10 +455,23 @@ int main() {
 
     rope_forward(&c->d.rope, 1, cos, sin);
 
-    layernorm(embeddings2, embeddings, m->layers[0].input_layernorm, x);
-    self_attention(embeddings, embeddings2, x, 0, 0, sin, cos);
+    {
+        /* save skip */
+        memcpy(skip, embeddings, c->n_embed * sizeof(__bf16));
 
-    layernorm(embeddings2, embeddings, m->layers[0].post_attn_layernorm, x);
+        layernorm(embeddings2, embeddings, m->layers[0].input_layernorm, x);
+        self_attention(embeddings, embeddings2, x, 0, 0, sin, cos);
+
+        /* residual */
+        add(embeddings2, embeddings, skip, c->n_embed);
+    }
+
+    {
+        /* save skip */
+        memcpy(skip, embeddings2, c->n_embed * sizeof(__bf16));
+
+        layernorm(embeddings, embeddings2, m->layers[0].post_attn_layernorm, x);
+    }
 
     volatile int dummy = 0;
 }
