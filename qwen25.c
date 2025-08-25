@@ -41,6 +41,9 @@ struct Layer {
     const __bf16 *v_proj_w;
     const __bf16 *v_proj_b;
     const __bf16 *o_proj_w;
+    const __bf16 *mlp_gate_proj;
+    const __bf16 *mlp_up_proj;
+    const __bf16 *mlp_down_proj;
 };
 
 struct Mmapping {
@@ -205,6 +208,27 @@ void mmap_init(struct Config *config, struct Mmapping *mmapping) {
     file_size = lseek(fd, 0, SEEK_END);
     lseek(fd, 0, SEEK_SET);
     l0->post_attn_layernorm = (__bf16 *)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    close(fd);
+
+    fd = open("layer_0_mlp_down_proj.bin", O_RDONLY);
+    assert(fd > -1);
+    file_size = lseek(fd, 0, SEEK_END);
+    lseek(fd, 0, SEEK_SET);
+    l0->mlp_down_proj = (__bf16 *)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    close(fd);
+
+    fd = open("layer_0_mlp_up_proj.bin", O_RDONLY);
+    assert(fd > -1);
+    file_size = lseek(fd, 0, SEEK_END);
+    lseek(fd, 0, SEEK_SET);
+    l0->mlp_up_proj = (__bf16 *)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    close(fd);
+
+    fd = open("layer_0_mlp_gate_proj.bin", O_RDONLY);
+    assert(fd > -1);
+    file_size = lseek(fd, 0, SEEK_END);
+    lseek(fd, 0, SEEK_SET);
+    l0->mlp_gate_proj = (__bf16 *)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
     close(fd);
 }
 
