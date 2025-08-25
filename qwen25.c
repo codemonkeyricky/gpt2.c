@@ -486,39 +486,44 @@ int main() {
 
     rope_forward(&c->d.rope, 1, cos, sin);
 
-    {
-        /* save skip */
-        memcpy(skip, embeddings, c->n_embed * sizeof(__bf16));
+    for (int k = 0; k < x->config.n_layers; k++) {
 
-        layernorm(embeddings2, embeddings, m->layers[0].input_layernorm, x);
-        self_attention(embeddings, embeddings2, x, 0, 0, sin, cos);
+        {
+            /* save skip */
+            memcpy(skip, embeddings, c->n_embed * sizeof(__bf16));
 
-        /* residual */
-        add(embeddings2, embeddings, skip, c->n_embed);
-    }
+            layernorm(embeddings2, embeddings, m->layers[k].input_layernorm, x);
+            self_attention(embeddings, embeddings2, x, 0, 0, sin, cos);
 
-    {
-        /* save skip */
-        memcpy(skip, embeddings2, c->n_embed * sizeof(__bf16));
+            /* residual */
+            add(embeddings2, embeddings, skip, c->n_embed);
+        }
 
-        layernorm(embeddings, embeddings2, m->layers[0].post_attn_layernorm, x);
+        {
+            /* save skip */
+            memcpy(skip, embeddings2, c->n_embed * sizeof(__bf16));
 
-        __bf16 embeddings2[11008] = {}, embeddings3[11008] = {}, embeddings4[11008] = {};
+            layernorm(embeddings, embeddings2, m->layers[k].post_attn_layernorm, x);
 
-        /* up proj */
-        matmul(embeddings2, embeddings, m->layers[0].mlp_up_proj, c->n_embed, 11008);
+            __bf16 embeddings2[11008] = {}, embeddings3[11008] = {}, embeddings4[11008] = {};
 
-        /* gate proj */
-        matmul(embeddings3, embeddings, m->layers[0].mlp_gate_proj, c->n_embed, 11008);
-        silu_array(embeddings4, embeddings3, 11008);
+            /* up proj */
+            matmul(embeddings2, embeddings, m->layers[k].mlp_up_proj, c->n_embed, 11008);
 
-        mul(embeddings3, embeddings2, embeddings4, 11008);
+            /* gate proj */
+            matmul(embeddings3, embeddings, m->layers[k].mlp_gate_proj, c->n_embed, 11008);
+            silu_array(embeddings4, embeddings3, 11008);
 
-        /* down proj */
-        matmul(embeddings, embeddings3, m->layers[0].mlp_down_proj, 11008, c->n_embed);
+            mul(embeddings3, embeddings2, embeddings4, 11008);
 
-        /* residual */
-        add(embeddings_short, embeddings, skip, c->n_embed);
+            /* down proj */
+            matmul(embeddings, embeddings3, m->layers[k].mlp_down_proj, 11008, c->n_embed);
+
+            /* residual */
+            add(embeddings_short, embeddings, skip, c->n_embed);
+
+            memcpy(embeddings, embeddings_short, c->n_embed * sizeof(__bf16));
+        }
     }
 
     volatile int dummy = 0;
