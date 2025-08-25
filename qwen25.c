@@ -212,14 +212,7 @@ void config_init(struct Config *config) {
     rope_init(config);
 }
 
-void input_layernorm(__bf16 *out, const __bf16 *in, struct Config *c, struct Mmapping *m) {
-    const __bf16 *weight = m->layers[0].input_layernorm;
-    // const __bf16 *bias = m->layers[0].input_layernorm_bias;
-
-    // mean = x.mean(-1, keepdim=True)
-    // variance = x.var(-1, keepdim=True, unbiased=False)
-    // x = (x - mean) / torch.sqrt(variance + self.variance_epsilon)
-    // return x * self.weight + self.bias
+void layernorm(__bf16 *out, const __bf16 *in, const __bf16 *weight, struct Config *c, struct Mmapping *m) {
 
     float mean = 0.0f;
     for (int i = 0; i < c->n_embed; i++) {
@@ -451,7 +444,9 @@ int main() {
 
     rope_forward(&c->d.rope, 1, cos, sin);
 
-    input_layernorm(embeddings2, embeddings, c, m);
+    layernorm(embeddings2, embeddings, m->layers[0].input_layernorm, c, m);
+    self_attention(embeddings, embeddings2, x, 0, 0, sin, cos);
+
     self_attention(embeddings, embeddings2, x, 0, 0, sin, cos);
 
     volatile int dummy = 0;
