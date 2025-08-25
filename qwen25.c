@@ -453,6 +453,12 @@ void runtime_init(struct Transformer *xfmr) {
     }
 }
 
+void silu_array(__bf16 *output, const __bf16 *input, size_t n) {
+    for (size_t i = 0; i < n; ++i) {
+        output[i] = input[i] / (1.0f + expf(-input[i]));
+    }
+}
+
 int main() {
 
     // struct Mmapping mmapping = {};
@@ -468,7 +474,8 @@ int main() {
     mmap_init(c, m);
     runtime_init(x);
 
-    __bf16 embeddings[c->n_embed] = {}, embeddings2[c->n_embed] = {}, skip[c->n_embed] = {};
+    __bf16 embeddings[c->n_embed] = {}, embeddings2[c->n_embed] = {}, skip[c->n_embed] = {},
+           embeddings3[c->n_embed] = {};
 
     int token = 151644;
     memcpy(embeddings, m->embeddings + token * c->n_embed, c->n_embed * sizeof(__bf16));
@@ -495,6 +502,22 @@ int main() {
         memcpy(skip, embeddings2, c->n_embed * sizeof(__bf16));
 
         layernorm(embeddings, embeddings2, m->layers[0].post_attn_layernorm, x);
+
+        __bf16 embeddings2[11008] = {}, embeddings3[11008] = {}, embeddings4[11008] = {};
+
+        /* up proj */
+        matmul(embeddings2, embeddings, m->layers[0].mlp_up_proj, c->n_embed, 11008);
+
+        /* gate proj */
+        matmul(embeddings3, embeddings, m->layers[0].mlp_gate_proj, c->n_embed, 11008);
+        silu_array(embeddings2, embeddings3, 11008);
+
+#if 0
+        mul(embeddings3, embeddings, embeddings2, c->n_embed);
+
+        /* down proj */
+        matmul(embeddings, embeddings3, m->layers[0].mlp_down_proj, c->n_embed, c->n_embed);
+#endif
     }
 
     volatile int dummy = 0;
