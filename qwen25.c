@@ -33,6 +33,7 @@ struct Config {
 
 struct Layer {
     const __bf16 *input_layernorm;
+    const __bf16 *post_attn_layernorm;
     const __bf16 *q_proj_w;
     const __bf16 *q_proj_b;
     const __bf16 *k_proj_w;
@@ -198,6 +199,13 @@ void mmap_init(struct Config *config, struct Mmapping *mmapping) {
     lseek(fd, 0, SEEK_SET);
     l0->o_proj_w = (__bf16 *)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
     close(fd);
+
+    fd = open("layer_0_post_attention_layernorm.bin", O_RDONLY);
+    assert(fd > -1);
+    file_size = lseek(fd, 0, SEEK_END);
+    lseek(fd, 0, SEEK_SET);
+    l0->post_attn_layernorm = (__bf16 *)mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    close(fd);
 }
 
 void config_init(struct Config *config) {
@@ -212,7 +220,10 @@ void config_init(struct Config *config) {
     rope_init(config);
 }
 
-void layernorm(__bf16 *out, const __bf16 *in, const __bf16 *weight, struct Config *c, struct Mmapping *m) {
+void layernorm(__bf16 *out, const __bf16 *in, const __bf16 *weight, struct Transformer *x) {
+
+    struct Config *c = &x->config;
+    struct Mmapping *m = &x->mmapping;
 
     float mean = 0.0f;
     for (int i = 0; i < c->n_embed; i++) {
@@ -444,10 +455,10 @@ int main() {
 
     rope_forward(&c->d.rope, 1, cos, sin);
 
-    layernorm(embeddings2, embeddings, m->layers[0].input_layernorm, c, m);
+    layernorm(embeddings2, embeddings, m->layers[0].input_layernorm, x);
     self_attention(embeddings, embeddings2, x, 0, 0, sin, cos);
 
-    self_attention(embeddings, embeddings2, x, 0, 0, sin, cos);
+    layernorm(embeddings2, embeddings, m->layers[0].post_attn_layernorm, x);
 
     volatile int dummy = 0;
 }
