@@ -475,7 +475,7 @@ int main() {
     runtime_init(x);
 
     __bf16 embeddings[c->n_embed] = {}, embeddings2[c->n_embed] = {}, skip[c->n_embed] = {},
-           embeddings3[c->n_embed] = {};
+           embeddings3[c->n_embed] = {}, embeddings_short[c->n_embed] = {};
 
     int token = 151644;
     memcpy(embeddings, m->embeddings + token * c->n_embed, c->n_embed * sizeof(__bf16));
@@ -510,14 +510,15 @@ int main() {
 
         /* gate proj */
         matmul(embeddings3, embeddings, m->layers[0].mlp_gate_proj, c->n_embed, 11008);
-        silu_array(embeddings2, embeddings3, 11008);
+        silu_array(embeddings4, embeddings3, 11008);
 
-#if 0
-        mul(embeddings3, embeddings, embeddings2, c->n_embed);
+        mul(embeddings3, embeddings2, embeddings4, 11008);
 
         /* down proj */
-        matmul(embeddings, embeddings3, m->layers[0].mlp_down_proj, c->n_embed, c->n_embed);
-#endif
+        matmul(embeddings, embeddings3, m->layers[0].mlp_down_proj, 11008, c->n_embed);
+
+        /* residual */
+        add(embeddings_short, embeddings, skip, c->n_embed);
     }
 
     volatile int dummy = 0;
